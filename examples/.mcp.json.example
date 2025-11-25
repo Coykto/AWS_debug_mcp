@@ -1,0 +1,58 @@
+{
+  "mcpServers": {
+    "aws-debug-mcp": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/YOUR_USERNAME/aws-debug-mcp",
+        "aws-debug-mcp"
+      ],
+      "env": {
+        "AWS_PROFILE": "your-profile-name",
+        "AWS_REGION": "us-east-1",
+        "AWS_DEBUG_MCP_TOOLS": "describe_log_groups,execute_log_insights_query,get_logs_insight_query_results"
+      }
+    }
+  }
+}
+
+// Alternative: Expose all tools (default if AWS_DEBUG_MCP_TOOLS is not set)
+{
+  "mcpServers": {
+    "aws-debug-mcp": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/YOUR_USERNAME/aws-debug-mcp",
+        "aws-debug-mcp"
+      ],
+      "env": {
+        "AWS_PROFILE": "your-profile-name",
+        "AWS_REGION": "us-east-1",
+        "AWS_DEBUG_MCP_TOOLS": "all"
+      }
+    }
+  }
+}
+
+// Alternative: Minimal set - only list and query logs
+{
+  "mcpServers": {
+    "aws-debug-mcp": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/YOUR_USERNAME/aws-debug-mcp",
+        "aws-debug-mcp"
+      ],
+      "env": {
+        "AWS_PROFILE": "your-profile-name",
+        "AWS_REGION": "us-east-1",
+        "AWS_DEBUG_MCP_TOOLS": "describe_log_groups,execute_log_insights_query"
+      }
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "mcpServers": {
+    "context7": {
+      "type": "sse",
+      "url": "https://mcp.context7.com/sse"
+    },
+    "serena": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena",
+        "serena",
+        "start-mcp-server",
+        "--context",
+        "ide-assistant",
+        "--project",
+        "barley"
+      ],
+      "env": {}
+    },
+    "awslabs.cloudwatch-mcp-server": {
+      "autoApprove": [],
+      "disabled": true,
+      "command": "uvx",
+      "args": [
+        "awslabs.cloudwatch-mcp-server@latest"
+      ],
+      "env": {
+        "AWS_PROFILE": "AdministratorAccess-381492197841",
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "transportType": "stdio"
+    },
+    "aws-debug-mcp": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "aws-debug-mcp"
+      ],
+      "cwd": "/Users/eb/PycharmProjects/AWS_debug_mcp",
+      "env": {
+        "AWS_PROFILE": "AdministratorAccess-381492197841",
+        "AWS_REGION": "us-east-1"
+      }
+    }
+  }
+}
+
