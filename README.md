@@ -2,7 +2,7 @@
 
 MCP server for debugging AWS distributed systems (Lambda, Step Functions, ECS) directly from Claude Code or any MCP client.
 
-**Status**: ✅ Complete with 21+ tools from CloudWatch, ECS, and Step Functions
+**Status**: ✅ Complete with 26 tools from CloudWatch, ECS, and Step Functions
 **Repository**: https://github.com/Coykto/AWS_debug_mcp
 
 ## Quick Start
@@ -60,8 +60,12 @@ Add to your project's `.mcp.json`:
 **AWS Documentation:**
 - "Search AWS docs for Lambda best practices"
 
-**Step Functions (if configured):**
-- "Execute MyStateMachine with input {...}"
+**Step Functions Debugging:**
+- "List all my Step Functions state machines"
+- "Show me the workflow definition and Lambda functions for state machine X"
+- "Show me failed executions for state machine X from the last 3 days"
+- "Get execution details including the workflow definition"
+- "Find executions where the Match state output contains 'company' and show me the Lambda ARNs"
 
 ## How It Works
 
@@ -111,17 +115,25 @@ This MCP server acts as a **proxy/gateway** to AWS MCP servers:
 - `aws_knowledge_aws___read_documentation` - Convert docs to markdown
 - `aws_knowledge_aws___recommend` - Get doc recommendations
 
-### Step Functions (Dynamic)
+### Step Functions (5 tools)
 
-Step Functions tools are **dynamically generated** from your state machines. Configure which state machines to expose:
+**Debugging:**
+- `list_state_machines` - List all state machines (get ARNs)
+- `get_state_machine_definition` - Get ASL definition with extracted Lambda ARNs and resources
+- `list_step_function_executions` - List executions with filtering
+- `get_step_function_execution_details` - Get full execution details with state inputs/outputs
+- `search_step_function_executions` - Advanced search with state/input/output pattern matching
 
-```json
-"env": {
-  "STATE_MACHINE_LIST": "MyStateMachine1,MyStateMachine2"
-}
-```
+**Definition & Resources:**
+The `get_state_machine_definition` tool extracts:
+- Full Amazon States Language (ASL) workflow definition
+- Lambda function ARNs used in the workflow
+- Other resources (SNS topics, SQS queues, DynamoDB tables, nested state machines)
+- IAM role, logging, and tracing configuration
 
-See [Step Functions MCP docs](https://awslabs.github.io/mcp/servers/stepfunctions-tool-mcp-server) for details.
+You can also include the definition with execution details using `include_definition=True` in:
+- `get_step_function_execution_details` - See the workflow definition alongside execution data
+- `search_step_function_executions` - See definitions with filtered execution results
 
 ## Configuration
 
@@ -144,7 +156,7 @@ Filter which tools to expose using `AWS_DEBUG_MCP_TOOLS`:
 // Debugging focus - logs, metrics, alarms, ECS troubleshooting
 "AWS_DEBUG_MCP_TOOLS": "describe_log_groups,analyze_log_group,execute_log_insights_query,get_active_alarms,ecs_troubleshooting_tool,ecs_resource_management"
 
-// Expose all 21 tools (default)
+// Expose all 26 tools (default)
 "AWS_DEBUG_MCP_TOOLS": "all"
 ```
 
@@ -154,17 +166,7 @@ CloudWatch: `describe_log_groups`, `analyze_log_group`, `execute_log_insights_qu
 
 ECS: `containerize_app`, `build_and_push_image_to_ecr`, `validate_ecs_express_mode_prerequisites`, `wait_for_service_ready`, `delete_app`, `ecs_troubleshooting_tool`, `ecs_resource_management`, `aws_knowledge_aws___search_documentation`, `aws_knowledge_aws___read_documentation`, `aws_knowledge_aws___recommend`
 
-### Step Functions Configuration
-```json
-"env": {
-  "STATE_MACHINE_LIST": "StateMachine1,StateMachine2",
-  // OR
-  "STATE_MACHINE_PREFIX": "prod-",
-  // OR
-  "STATE_MACHINE_TAG_KEY": "Environment",
-  "STATE_MACHINE_TAG_VALUE": "Production"
-}
-```
+Step Functions: `list_state_machines`, `get_state_machine_definition`, `list_step_function_executions`, `get_step_function_execution_details`, `search_step_function_executions`
 
 ## Troubleshooting
 

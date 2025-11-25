@@ -11,7 +11,8 @@
       "env": {
         "AWS_PROFILE": "your-profile-name",
         "AWS_REGION": "us-east-1",
-        "AWS_DEBUG_MCP_TOOLS": "describe_log_groups,execute_log_insights_query,get_logs_insight_query_results"
+        "AWS_DEBUG_MCP_TOOLS": ""describe_log_groups,analyze_log_group,execute_log_insights_query,get_logs_insight_query_results,cancel_logs_insight_query,list_state_machines
+  ,get_state_machine_definition,list_step_function_executions,get_step_function_execution_details,search_step_function_executions"
       }
     }
   }

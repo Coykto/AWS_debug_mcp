@@ -489,26 +489,141 @@ if should_expose_tool("aws_knowledge_aws___recommend"):
         )
 
 
-# Step Functions Tools - proxied from awslabs.stepfunctions-tool-mcp-server
-# NOTE: Step Functions MCP is DYNAMIC - it exposes your state machines as tools.
-# Unlike other MCPs, it doesn't have predefined tools. Instead, each of your
-# Step Functions state machines becomes a tool that you can call.
-#
-# To configure which state machines to expose, you need to set these environment
-# variables in your .mcp.json:
-#
-# - STATE_MACHINE_LIST: Comma-separated list of state machine names
-#   Example: "MyStateMachine1,MyStateMachine2"
-#
-# - STATE_MACHINE_PREFIX: Auto-include machines matching a prefix
-#   Example: "prod-" (includes all state machines starting with "prod-")
-#
-# - STATE_MACHINE_TAG_KEY and STATE_MACHINE_TAG_VALUE: Filter by AWS tags
-#   Example: TAG_KEY="Environment", TAG_VALUE="Production"
-#
-# Each state machine will appear as a tool with the state machine's name.
-# The tool's parameters are derived from the state machine's input schema.
-#
-# Since the tools are dynamically generated, we cannot pre-define them here.
-# The Step Functions MCP server will automatically expose them based on your
-# AWS environment and configuration.
+# Step Functions Debugging Tools - using boto3 directly
+# These tools provide comprehensive debugging capabilities for Step Functions executions
+from .tools.stepfunctions import StepFunctionsDebugger
+
+# Initialize debugger (uses AWS_REGION from environment)
+sf_debugger = StepFunctionsDebugger()
+
+
+if should_expose_tool("list_state_machines"):
+    @mcp.tool()
+    async def list_state_machines(max_results: int = 100) -> dict:
+        """
+        List all Step Functions state machines in the account.
+
+        Args:
+            max_results: Maximum number of state machines to return (default: 100)
+        """
+        state_machines = sf_debugger.list_state_machines(max_results=max_results)
+        return {
+            "state_machines": state_machines,
+            "count": len(state_machines)
+        }
+
+
+if should_expose_tool("list_step_function_executions"):
+    @mcp.tool()
+    async def list_step_function_executions(
+        state_machine_arn: str,
+        status_filter: str = "",
+        max_results: int = 100,
+        hours_back: int = 168
+    ) -> dict:
+        """
+        List executions for a Step Functions state machine.
+
+        Args:
+            state_machine_arn: ARN of the state machine
+            status_filter: Optional status filter (RUNNING, SUCCEEDED, FAILED, TIMED_OUT, ABORTED)
+            max_results: Maximum number of executions to return (default: 100)
+            hours_back: Number of hours to look back (default: 168 = 7 days)
+        """
+        executions = sf_debugger.list_executions(
+            state_machine_arn=state_machine_arn,
+            status_filter=status_filter if status_filter else None,
+            max_results=max_results,
+            hours_back=hours_back
+        )
+        return {
+            "executions": executions,
+            "count": len(executions),
+            "state_machine_arn": state_machine_arn
+        }
+
+
+if should_expose_tool("get_state_machine_definition"):
+    @mcp.tool()
+    async def get_state_machine_definition(state_machine_arn: str) -> dict:
+        """
+        Get the state machine definition including ASL and extracted resources.
+
+        Returns the full Amazon States Language (ASL) definition along with
+        extracted Lambda ARNs and other resource ARNs used in the workflow.
+
+        Args:
+            state_machine_arn: ARN of the state machine
+        """
+        return sf_debugger.get_state_machine_definition(state_machine_arn)
+
+
+if should_expose_tool("get_step_function_execution_details"):
+    @mcp.tool()
+    async def get_step_function_execution_details(
+        execution_arn: str,
+        include_definition: bool = False
+    ) -> dict:
+        """
+        Get detailed information about a specific Step Functions execution.
+
+        Includes full execution history with state-level inputs and outputs.
+        Only Step Functions states are included (Lambda task events are filtered out).
+
+        Args:
+            execution_arn: ARN of the execution
+            include_definition: If True, includes the state machine definition with Lambda ARNs (default: False)
+        """
+        if include_definition:
+            return sf_debugger.get_execution_details_with_definition(execution_arn)
+        return sf_debugger.get_execution_details(execution_arn)
+
+
+if should_expose_tool("search_step_function_executions"):
+    @mcp.tool()
+    async def search_step_function_executions(
+        state_machine_arn: str,
+        state_name: str = "",
+        input_pattern: str = "",
+        output_pattern: str = "",
+        status_filter: str = "",
+        max_results: int = 50,
+        hours_back: int = 168,
+        include_definition: bool = False
+    ) -> dict:
+        """
+        Search Step Functions executions with advanced filtering.
+
+        Supports regex patterns for state names and input/output content matching.
+        This is powerful for finding specific execution scenarios.
+
+        Args:
+            state_machine_arn: ARN of the state machine
+            state_name: Filter by state name (supports regex, e.g., "Match.*Entity")
+            input_pattern: Regex pattern to match in state inputs (e.g., "customer_id.*12345")
+            output_pattern: Regex pattern to match in state outputs (e.g., "entity_type.*company")
+            status_filter: Optional status filter (RUNNING, SUCCEEDED, FAILED, etc.)
+            max_results: Maximum number of executions to process (default: 50)
+            hours_back: Number of hours to look back (default: 168 = 7 days)
+            include_definition: If True, includes the state machine definition with Lambda ARNs (default: False)
+        """
+        executions = sf_debugger.search_executions(
+            state_machine_arn=state_machine_arn,
+            state_name=state_name if state_name else None,
+            input_pattern=input_pattern if input_pattern else None,
+            output_pattern=output_pattern if output_pattern else None,
+            status_filter=status_filter if status_filter else None,
+            max_results=max_results,
+            hours_back=hours_back,
+            include_definition=include_definition
+        )
+        return {
+            "executions": executions,
+            "count": len(executions),
+            "filters": {
+                "state_name": state_name or None,
+                "input_pattern": input_pattern or None,
+                "output_pattern": output_pattern or None,
+                "status": status_filter or None
+            }
+        }
