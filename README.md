@@ -1,8 +1,8 @@
 # Debug MCP
 
-MCP server for debugging distributed systems (starting with AWS: Lambda, Step Functions, ECS) directly from Claude Code or any MCP client.
+MCP server for debugging distributed systems (AWS: Lambda, Step Functions, ECS + LangSmith) directly from Claude Code or any MCP client.
 
-**Status**: ✅ Complete with 26 tools from CloudWatch, ECS, and Step Functions
+**Status**: ✅ Complete with tools from CloudWatch, ECS, Step Functions, and LangSmith
 **Repository**: https://github.com/Coykto/debug_mcp
 
 ## Quick Start
@@ -66,6 +66,12 @@ Add to your project's `.mcp.json`:
 - "Show me failed executions for state machine X from the last 3 days"
 - "Get execution details including the workflow definition"
 - "Find executions where the Match state output contains 'company' and show me the Lambda ARNs"
+
+**LangSmith Tracing:**
+- "List my LangSmith projects in prod environment"
+- "Show me errored runs from the last hour in production"
+- "Get details for LangSmith run abc-123 in dev"
+- "Search for slow runs (>5 seconds) in my project"
 
 ## How It Works
 
@@ -135,6 +141,31 @@ You can also include the definition with execution details using `include_defini
 - `get_step_function_execution_details` - See the workflow definition alongside execution data
 - `search_step_function_executions` - See definitions with filtered execution results
 
+### LangSmith (4 tools)
+
+**Tracing & Debugging:**
+- `list_langsmith_projects` - List available LangSmith projects
+- `list_langsmith_runs` - List runs/traces with filtering (type, errors, time range)
+- `get_langsmith_run_details` - Get full run details with inputs/outputs and child runs
+- `search_langsmith_runs` - Advanced search (latency, tags, metadata, errors)
+
+**Multi-Environment Support:**
+Each LangSmith tool requires an `environment` parameter:
+- `prod` - Uses `PRODUCTION/env/vars` from AWS Secrets Manager
+- `dev` - Uses `DEV/env/vars` from AWS Secrets Manager
+- `local` - Loads from `.env` file using python-dotenv
+
+**Credentials in Secrets Manager:**
+Your AWS Secrets Manager secret should contain:
+- `LANGCHAIN_API_KEY` - Your LangSmith API key
+- `LANGCHAIN_PROJECT` - Default project name (optional)
+
+**Local Development (.env file):**
+```env
+LANGCHAIN_API_KEY=ls_your_api_key_here
+LANGCHAIN_PROJECT=your-project-name
+```
+
 ## Configuration
 
 ### AWS Authentication
@@ -150,8 +181,8 @@ You can also include the definition with execution details using `include_defini
 Filter which tools to expose using `DEBUG_MCP_TOOLS`:
 
 ```json
-// Default (if not set) - core debugging tools (10 tools)
-// CloudWatch Logs (5) + Step Functions (5)
+// Default (if not set) - core debugging tools (14 tools)
+// CloudWatch Logs (5) + Step Functions (5) + LangSmith (4)
 // Omit DEBUG_MCP_TOOLS to use this default
 
 // Minimal - only logs
@@ -160,13 +191,14 @@ Filter which tools to expose using `DEBUG_MCP_TOOLS`:
 // Debugging focus - logs, metrics, alarms, ECS troubleshooting
 "DEBUG_MCP_TOOLS": "describe_log_groups,analyze_log_group,execute_log_insights_query,get_active_alarms,ecs_troubleshooting_tool,ecs_resource_management"
 
-// Expose all 26 tools
+// Expose all tools
 "DEBUG_MCP_TOOLS": "all"
 ```
 
 **Default tools** (when `DEBUG_MCP_TOOLS` is not set):
 - CloudWatch Logs: `describe_log_groups`, `analyze_log_group`, `execute_log_insights_query`, `get_logs_insight_query_results`, `cancel_logs_insight_query`
 - Step Functions: `list_state_machines`, `get_state_machine_definition`, `list_step_function_executions`, `get_step_function_execution_details`, `search_step_function_executions`
+- LangSmith: `list_langsmith_projects`, `list_langsmith_runs`, `get_langsmith_run_details`, `search_langsmith_runs`
 
 **Available tool names:**
 
@@ -175,6 +207,8 @@ CloudWatch: `describe_log_groups`, `analyze_log_group`, `execute_log_insights_qu
 ECS: `containerize_app`, `build_and_push_image_to_ecr`, `validate_ecs_express_mode_prerequisites`, `wait_for_service_ready`, `delete_app`, `ecs_troubleshooting_tool`, `ecs_resource_management`, `aws_knowledge_aws___search_documentation`, `aws_knowledge_aws___read_documentation`, `aws_knowledge_aws___recommend`
 
 Step Functions: `list_state_machines`, `get_state_machine_definition`, `list_step_function_executions`, `get_step_function_execution_details`, `search_step_function_executions`
+
+LangSmith: `list_langsmith_projects`, `list_langsmith_runs`, `get_langsmith_run_details`, `search_langsmith_runs`
 
 ## Troubleshooting
 

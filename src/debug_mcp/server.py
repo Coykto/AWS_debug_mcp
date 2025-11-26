@@ -13,16 +13,23 @@ mcp = FastMCP("debug-mcp")
 # If not set, expose core debugging tools by default
 # Set to "all" to expose all 26 tools
 DEFAULT_TOOLS = (
+    # CloudWatch Logs (5 tools)
     "describe_log_groups,"
     "analyze_log_group,"
     "execute_log_insights_query,"
     "get_logs_insight_query_results,"
     "cancel_logs_insight_query,"
+    # Step Functions (5 tools)
     "list_state_machines,"
     "get_state_machine_definition,"
     "list_step_function_executions,"
     "get_step_function_execution_details,"
-    "search_step_function_executions"
+    "search_step_function_executions,"
+    # LangSmith (4 tools)
+    "list_langsmith_projects,"
+    "list_langsmith_runs,"
+    "get_langsmith_run_details,"
+    "search_langsmith_runs"
 )
 
 configured_tools_str = os.getenv("DEBUG_MCP_TOOLS", DEFAULT_TOOLS)
@@ -639,5 +646,175 @@ if should_expose_tool("search_step_function_executions"):
                 "input_pattern": input_pattern or None,
                 "output_pattern": output_pattern or None,
                 "status": status_filter or None
+            }
+        }
+
+
+# LangSmith Debugging Tools - using langsmith SDK
+# Supports multiple environments via AWS Secrets Manager or .env file
+from .tools.langsmith import get_langsmith_debugger
+
+
+if should_expose_tool("list_langsmith_projects"):
+    @mcp.tool()
+    async def list_langsmith_projects(
+        environment: str,
+        limit: int = 100
+    ) -> dict:
+        """
+        List available LangSmith projects.
+
+        Args:
+            environment: Environment to query ('prod', 'dev', 'local')
+                        - prod: Uses PRODUCTION/env/vars from AWS Secrets Manager
+                        - dev: Uses DEV/env/vars from AWS Secrets Manager
+                        - local: Loads from .env file
+            limit: Maximum number of projects to return (default: 100)
+        """
+        debugger = get_langsmith_debugger(environment)
+        projects = debugger.list_projects(limit=limit)
+        return {
+            "environment": environment,
+            "projects": projects,
+            "count": len(projects),
+            "default_project": debugger.default_project
+        }
+
+
+if should_expose_tool("list_langsmith_runs"):
+    @mcp.tool()
+    async def list_langsmith_runs(
+        environment: str,
+        project_name: str = "",
+        run_type: str = "",
+        is_root: bool = True,
+        error_only: bool = False,
+        hours_back: int = 24,
+        limit: int = 100
+    ) -> dict:
+        """
+        List runs/traces from a LangSmith project.
+
+        Args:
+            environment: Environment to query ('prod', 'dev', 'local')
+            project_name: Project name (uses default from credentials if empty)
+            run_type: Filter by type: chain, llm, tool, retriever, embedding, prompt, parser
+            is_root: If True, return only root runs/top-level traces (default: True)
+            error_only: If True, return only errored runs (default: False)
+            hours_back: Number of hours to look back (default: 24)
+            limit: Maximum number of runs to return (default: 100)
+        """
+        from datetime import datetime, timedelta, timezone
+
+        debugger = get_langsmith_debugger(environment)
+
+        start_time = datetime.now(timezone.utc) - timedelta(hours=hours_back)
+
+        runs = debugger.list_runs(
+            project_name=project_name if project_name else None,
+            run_type=run_type if run_type else None,
+            is_root=is_root,
+            error=True if error_only else None,
+            start_time=start_time,
+            limit=limit
+        )
+
+        return {
+            "environment": environment,
+            "project": project_name or debugger.default_project,
+            "runs": runs,
+            "count": len(runs),
+            "filters": {
+                "run_type": run_type or None,
+                "is_root": is_root,
+                "error_only": error_only,
+                "hours_back": hours_back
+            }
+        }
+
+
+if should_expose_tool("get_langsmith_run_details"):
+    @mcp.tool()
+    async def get_langsmith_run_details(
+        environment: str,
+        run_id: str,
+        include_children: bool = True
+    ) -> dict:
+        """
+        Get detailed information about a specific LangSmith run/trace.
+
+        Args:
+            environment: Environment to query ('prod', 'dev', 'local')
+            run_id: The run ID (UUID) to retrieve
+            include_children: If True, also fetch child runs (default: True)
+        """
+        debugger = get_langsmith_debugger(environment)
+        details = debugger.get_run_details(run_id, include_children=include_children)
+
+        return {
+            "environment": environment,
+            "run": details
+        }
+
+
+if should_expose_tool("search_langsmith_runs"):
+    @mcp.tool()
+    async def search_langsmith_runs(
+        environment: str,
+        project_name: str = "",
+        query: str = "",
+        run_type: str = "",
+        error_only: bool = False,
+        min_latency: float = 0,
+        max_latency: float = 0,
+        tags: str = "",
+        hours_back: int = 24,
+        limit: int = 50
+    ) -> dict:
+        """
+        Search LangSmith runs with advanced filtering.
+
+        Args:
+            environment: Environment to query ('prod', 'dev', 'local')
+            project_name: Project name (uses default from credentials if empty)
+            query: Text query to search in run names
+            run_type: Filter by type: chain, llm, tool, retriever, embedding
+            error_only: If True, return only errored runs
+            min_latency: Minimum latency in seconds (0 = no minimum)
+            max_latency: Maximum latency in seconds (0 = no maximum)
+            tags: Comma-separated list of tags to filter by
+            hours_back: Number of hours to look back (default: 24)
+            limit: Maximum number of runs to return (default: 50)
+        """
+        debugger = get_langsmith_debugger(environment)
+
+        # Parse tags
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+
+        runs = debugger.search_runs(
+            project_name=project_name if project_name else None,
+            query=query if query else None,
+            run_type=run_type if run_type else None,
+            error=True if error_only else None,
+            min_latency=min_latency if min_latency > 0 else None,
+            max_latency=max_latency if max_latency > 0 else None,
+            tags=tag_list,
+            hours_back=hours_back,
+            limit=limit
+        )
+
+        return {
+            "environment": environment,
+            "project": project_name or debugger.default_project,
+            "runs": runs,
+            "count": len(runs),
+            "filters": {
+                "query": query or None,
+                "run_type": run_type or None,
+                "error_only": error_only,
+                "min_latency": min_latency if min_latency > 0 else None,
+                "max_latency": max_latency if max_latency > 0 else None,
+                "tags": tag_list,
+                "hours_back": hours_back
             }
         }
