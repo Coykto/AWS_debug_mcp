@@ -1,9 +1,5 @@
 {
   "mcpServers": {
-    "context7": {
-      "type": "sse",
-      "url": "https://mcp.context7.com/sse"
-    },
     "serena": {
       "type": "stdio",
       "command": "uvx",
@@ -15,23 +11,11 @@
         "--context",
         "ide-assistant",
         "--project",
-        "barley"
+        "debug_mcp",
+        "--enable-web-dashboard",
+        "false"
       ],
       "env": {}
-    },
-    "aws-debug-mcp": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/Coykto/AWS_debug_mcp",
-        "aws-debug-mcp"
-      ],
-      "env": {
-        "AWS_PROFILE": "AdministratorAccess-381492197841",
-        "AWS_REGION": "us-west-2"
-      }
     }
   }
 }
-
