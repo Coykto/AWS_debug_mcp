@@ -8,6 +8,7 @@ from fastmcp import FastMCP
 from .mcp_proxy import proxy
 from .tools.langsmith import get_langsmith_debugger
 from .tools.stepfunctions import StepFunctionsDebugger
+from .utils.run_memory import get_memory_store
 
 # Initialize MCP server
 mcp = FastMCP("debug-mcp")
@@ -30,11 +31,13 @@ DEFAULT_TOOLS = (
     "list_step_function_executions,"
     "get_step_function_execution_details,"
     "search_step_function_executions,"
-    # LangSmith (4 tools)
+    # LangSmith (6 tools)
     "list_langsmith_projects,"
     "list_langsmith_runs,"
     "get_langsmith_run_details,"
-    "search_langsmith_runs"
+    "search_langsmith_runs,"
+    "search_run_content,"
+    "get_run_field"
 )
 
 configured_tools_str = os.getenv("DEBUG_MCP_TOOLS", DEFAULT_TOOLS)
@@ -695,27 +698,119 @@ if should_expose_tool("list_langsmith_runs"):
 if should_expose_tool("get_langsmith_run_details"):
 
     @mcp.tool()
-    async def get_langsmith_run_details(environment: str, run_id: str, include_children: bool = True) -> dict:
+    async def get_langsmith_run_details(
+        environment: str, run_id: str, include_children: bool = True, full_content: bool = False
+    ) -> dict:
         """
         Get detailed information about a specific LangSmith run/trace.
 
-        IMPORTANT: This tool returns large responses (~25k tokens with children).
-        DO NOT use this tool to search for content - use search_langsmith_runs instead.
-        Only use this tool AFTER you have found a specific run_id via search_langsmith_runs.
+        By default, returns a SUMMARY with key metadata. Full content is stored in memory
+        with semantic embeddings (sentence-transformers) and can be searched using
+        search_run_content() or accessed via get_run_field().
 
         Args:
             environment: Environment to query ('prod', 'dev', 'local')
             run_id: The run ID (UUID) to retrieve
             include_children: If True, also fetch child runs (default: True)
+            full_content: If True, return full content instead of summary (default: False).
+                         WARNING: Full content can be ~25k+ tokens. Use only when necessary.
 
-        WARNING: Setting include_children=True can return very large responses that
-        fill up context quickly. Only use include_children=True when you need to
-        inspect the full execution trace of a specific, known run.
+        Returns:
+            - reference_id: Use this with search_run_content() or get_run_field()
+            - summary: Key metadata (status, latency, tokens, tools used, etc.)
+            - If full_content=True: Also includes the complete run data
+
+        TIP: Use search_run_content(reference_id, "your query") to semantically search
+        within the run without loading everything into context.
         """
         debugger = get_langsmith_debugger(environment)
         details = debugger.get_run_details(run_id, include_children=include_children)
 
-        return {"environment": environment, "run": details}
+        # Create reference ID and store in memory
+        reference_id = f"{environment}:{run_id}"
+        memory = get_memory_store()
+
+        # Extract summary information
+        summary = _extract_run_summary(details)
+
+        # Store full content in memory for later retrieval
+        memory.store(reference_id, details, summary=summary)
+
+        result = {
+            "environment": environment,
+            "reference_id": reference_id,
+            "summary": summary,
+            "hint": (
+                "Full content stored in memory. Use search_run_content(reference_id, query) "
+                "to search within this run, or get_run_field(reference_id, field_path) for specific fields."
+            ),
+        }
+
+        # Optionally include full content (for backward compatibility or when explicitly needed)
+        if full_content:
+            result["run"] = details
+            result["warning"] = "Full content included. This may use significant context."
+
+        return result
+
+
+def _extract_run_summary(details: dict) -> dict:
+    """Extract key summary information from run details."""
+    summary = {
+        "id": details.get("id"),
+        "name": details.get("name"),
+        "status": details.get("status"),
+        "run_type": details.get("run_type"),
+        "latency_seconds": details.get("latency_seconds"),
+        "total_tokens": details.get("total_tokens"),
+        "prompt_tokens": details.get("prompt_tokens"),
+        "completion_tokens": details.get("completion_tokens"),
+        "error": details.get("error"),
+        "link": details.get("link"),
+    }
+
+    # Extract tools called from chat history
+    tools_called = []
+    outputs = details.get("outputs", {})
+    chat_history = outputs.get("chat_history", [])
+    if isinstance(chat_history, list):
+        for msg in chat_history:
+            if isinstance(msg, dict):
+                # Look for tool calls in AI messages
+                tool_calls = msg.get("tool_calls", [])
+                for tc in tool_calls:
+                    if isinstance(tc, dict) and "name" in tc:
+                        tools_called.append(tc["name"])
+                # Look for tool messages
+                if msg.get("type") == "tool":
+                    tool_name = msg.get("name", "unknown_tool")
+                    if tool_name not in tools_called:
+                        tools_called.append(tool_name)
+
+    summary["tools_called"] = list(set(tools_called)) if tools_called else []
+    summary["message_count"] = len(chat_history) if isinstance(chat_history, list) else 0
+
+    # Include user query if available
+    inputs = details.get("inputs", {})
+    if isinstance(inputs, dict):
+        input_data = inputs.get("input", {})
+        if isinstance(input_data, dict):
+            summary["user_query"] = input_data.get("user_query")
+
+    # Include final response text if available
+    if isinstance(outputs, dict):
+        response = outputs.get("response", {})
+        if isinstance(response, dict):
+            final_text = response.get("final_text", "")
+            if final_text:
+                # Truncate for summary
+                summary["response_preview"] = final_text[:500] + ("..." if len(final_text) > 500 else "")
+
+    # Child run count
+    children = details.get("children", [])
+    summary["child_count"] = len(children) if isinstance(children, list) else 0
+
+    return summary
 
 
 if should_expose_tool("search_langsmith_runs"):
@@ -795,4 +890,162 @@ if should_expose_tool("search_langsmith_runs"):
             "runs_searched": limit,
             "hours_back": hours_back,
             "tip": "Use get_langsmith_run_details with a run_id to get full conversation details",
+        }
+
+
+if should_expose_tool("search_run_content"):
+
+    @mcp.tool()
+    async def search_run_content(
+        reference_id: str,
+        query: str,
+        search_type: str = "auto",
+        max_results: int = 5,
+    ) -> dict:
+        """
+        Search within a previously fetched LangSmith run's content using semantic similarity.
+
+        This tool searches through the full content of a run that was previously
+        retrieved with get_langsmith_run_details(). Use this to find specific
+        information without loading the entire run into context.
+
+        The run content is automatically chunked and embedded using sentence-transformers
+        (all-MiniLM-L6-v2 model) for semantic search. This means you can search using
+        natural language queries and find semantically related content.
+
+        Args:
+            reference_id: The reference_id returned by get_langsmith_run_details()
+                         (format: "environment:run_id", e.g., "dev:abc-123-def")
+            query: What to search for. Can be:
+                   - Specific text: "July 5th, 2024"
+                   - Keywords: "birthday start date"
+                   - Semantic queries: "when did the project start" (finds related content)
+            search_type: Search method to use:
+                        - "auto": Use semantic similarity search (default, recommended)
+                        - "keyword": Exact keyword/text matching only
+                        - "similar": Explicit semantic similarity search
+            max_results: Maximum number of matching chunks to return (default: 5)
+
+        Returns:
+            List of matching content chunks with their location (path) in the data structure
+            and similarity scores (for semantic search)
+
+        Example:
+            1. First: get_langsmith_run_details(environment="dev", run_id="abc-123")
+               -> Returns reference_id: "dev:abc-123"
+            2. Then: search_run_content(reference_id="dev:abc-123", query="RAG tool results")
+               -> Returns relevant chunks containing RAG tool information
+        """
+        memory = get_memory_store()
+        stored_run = memory.get(reference_id)
+
+        if not stored_run:
+            return {
+                "error": True,
+                "error_message": f"No stored run found for reference_id: {reference_id}",
+                "hint": "Make sure to call get_langsmith_run_details() first to store the run content.",
+                "available_runs": [r["reference_id"] for r in memory.list_stored_runs()],
+            }
+
+        # Determine search method
+        if search_type == "similar":
+            results = memory.search_similar(reference_id, query, max_results=max_results)
+            method_used = "semantic_similarity"
+        elif search_type == "keyword":
+            results = memory.search_keyword(reference_id, query, max_results=max_results)
+            method_used = "keyword"
+        else:  # auto
+            # Try similarity first if embeddings are available
+            results = memory.search_similar(reference_id, query, max_results=max_results)
+            if results and any("similarity" in r for r in results):
+                method_used = "semantic_similarity"
+            else:
+                results = memory.search_keyword(reference_id, query, max_results=max_results)
+                method_used = "keyword"
+
+        return {
+            "reference_id": reference_id,
+            "query": query,
+            "search_method": method_used,
+            "results": results,
+            "result_count": len(results),
+            "tip": "Use get_run_field(reference_id, path) to get the full content at a specific path",
+        }
+
+
+if should_expose_tool("get_run_field"):
+
+    @mcp.tool()
+    async def get_run_field(reference_id: str, field_path: str) -> dict:
+        """
+        Get a specific field from a previously fetched LangSmith run.
+
+        Use this to retrieve the full content of a specific field after
+        finding it with search_run_content().
+
+        Args:
+            reference_id: The reference_id from get_langsmith_run_details()
+            field_path: Dot-notation path to the field. Examples:
+                       - "outputs.chat_history.2.content" - Get 3rd message content
+                       - "outputs.response.final_text" - Get the final response
+                       - "inputs.input.user_query" - Get the user's question
+                       - "children.0.outputs" - Get first child run's outputs
+
+        Returns:
+            The value at the specified path, or error if not found
+
+        Example paths for common data:
+            - User query: "inputs.input.user_query"
+            - Chat history: "outputs.chat_history"
+            - Specific message: "outputs.chat_history.{index}.content"
+            - Final response: "outputs.response.final_text"
+            - Tool calls: "outputs.chat_history.{index}.tool_calls"
+        """
+        memory = get_memory_store()
+        stored_run = memory.get(reference_id)
+
+        if not stored_run:
+            return {
+                "error": True,
+                "error_message": f"No stored run found for reference_id: {reference_id}",
+                "hint": "Make sure to call get_langsmith_run_details() first to store the run content.",
+                "available_runs": [r["reference_id"] for r in memory.list_stored_runs()],
+            }
+
+        value = memory.get_field(reference_id, field_path)
+
+        if value is None:
+            # Try to provide helpful suggestions
+            available_keys = []
+            parts = field_path.split(".")
+            parent_path = ".".join(parts[:-1]) if len(parts) > 1 else ""
+            parent = memory.get_field(reference_id, parent_path) if parent_path else stored_run.full_data
+
+            if isinstance(parent, dict):
+                available_keys = list(parent.keys())[:20]  # Limit suggestions
+            elif isinstance(parent, list):
+                available_keys = [f"{i}" for i in range(min(len(parent), 20))]
+
+            return {
+                "error": True,
+                "error_message": f"Field not found at path: {field_path}",
+                "parent_path": parent_path or "(root)",
+                "available_keys": available_keys,
+                "hint": "Check the path and try again. Use search_run_content() to find content locations.",
+            }
+
+        # Calculate size info for large values
+        size_info = {}
+        if isinstance(value, str):
+            size_info = {"type": "string", "length": len(value), "word_count": len(value.split())}
+        elif isinstance(value, list):
+            size_info = {"type": "list", "length": len(value)}
+        elif isinstance(value, dict):
+            size_info = {"type": "dict", "keys": list(value.keys())[:20]}
+
+        return {
+            "reference_id": reference_id,
+            "field_path": field_path,
+            "value": value,
+            "size_info": size_info,
         }
