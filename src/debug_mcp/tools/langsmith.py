@@ -354,7 +354,7 @@ class LangSmithDebugger:
                         "match_location": match_info["location"],
                         "context_snippet": match_info["snippet"],
                         "start_time": run.start_time.isoformat() if run.start_time else None,
-                        "link": self.get_run_url(str(run.id)),
+                        "link": self.get_run_url(run),
                     }
                 )
 
@@ -444,17 +444,17 @@ class LangSmithDebugger:
                     return match
         return None
 
-    def get_run_url(self, run_id: str) -> str:
+    def get_run_url(self, run: Any) -> str:
         """
         Get the LangSmith UI URL for a run.
 
         Args:
-            run_id: The run ID
+            run: The LangSmith run object (RunBase)
 
         Returns:
             URL to view the run in LangSmith UI
         """
-        return self.client.get_run_url(run_id=run_id)
+        return self.client.get_run_url(run=run)
 
     def _serialize_run(self, run: Any, include_full_data: bool = False) -> dict[str, Any]:
         """
@@ -506,7 +506,7 @@ class LangSmithDebugger:
 
         # Add link to UI
         try:
-            data["link"] = self.get_run_url(str(run.id))
+            data["link"] = self.get_run_url(run)
         except Exception:
             pass
 

@@ -699,10 +699,18 @@ if should_expose_tool("get_langsmith_run_details"):
         """
         Get detailed information about a specific LangSmith run/trace.
 
+        IMPORTANT: This tool returns large responses (~25k tokens with children).
+        DO NOT use this tool to search for content - use search_langsmith_runs instead.
+        Only use this tool AFTER you have found a specific run_id via search_langsmith_runs.
+
         Args:
             environment: Environment to query ('prod', 'dev', 'local')
             run_id: The run ID (UUID) to retrieve
             include_children: If True, also fetch child runs (default: True)
+
+        WARNING: Setting include_children=True can return very large responses that
+        fill up context quickly. Only use include_children=True when you need to
+        inspect the full execution trace of a specific, known run.
         """
         debugger = get_langsmith_debugger(environment)
         details = debugger.get_run_details(run_id, include_children=include_children)
@@ -746,16 +754,37 @@ if should_expose_tool("search_langsmith_runs"):
 
         Returns:
             List of matches with run_id, context snippet, and link to full details
+
+        If this tool fails, please report the issue at:
+        https://github.com/Coykto/debug_mcp/issues
         """
         debugger = get_langsmith_debugger(environment)
 
-        matches = debugger.find_conversation_by_content(
-            search_text=search_text,
-            project_name=project_name if project_name else None,
-            hours_back=hours_back,
-            limit=limit,
-            include_children=include_children,
-        )
+        try:
+            matches = debugger.find_conversation_by_content(
+                search_text=search_text,
+                project_name=project_name if project_name else None,
+                hours_back=hours_back,
+                limit=limit,
+                include_children=include_children,
+            )
+        except Exception as e:
+            # Provide helpful error message with guidance
+            error_msg = str(e)
+            return {
+                "error": True,
+                "error_message": error_msg,
+                "environment": environment,
+                "search_text": search_text,
+                "guidance": (
+                    "This search tool encountered an error. "
+                    "DO NOT fall back to using get_langsmith_run_details to search - "
+                    "that approach will overflow context with ~25k tokens per run. "
+                    "Instead, please report this issue so it can be fixed."
+                ),
+                "report_issue": "https://github.com/Coykto/debug_mcp/issues",
+                "tip": "Include the error message and search parameters when reporting.",
+            }
 
         return {
             "environment": environment,
