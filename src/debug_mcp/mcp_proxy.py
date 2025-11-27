@@ -12,10 +12,10 @@ from mcp.client.stdio import stdio_client
 class MCPProxy:
     """Proxy to AWS MCP servers, exposing only selected tools."""
 
-    def __init__(self):
+    def __init__(self, aws_profile: str = "", aws_region: str = "us-east-1"):
         self.cloudwatch_session: ClientSession | None = None
-        self.aws_profile = os.getenv("AWS_PROFILE", "")
-        self.aws_region = os.getenv("AWS_REGION", "us-east-1")
+        self.aws_profile = aws_profile
+        self.aws_region = aws_region
 
     def _extract_content(self, result_content: list) -> dict | str:
         """
@@ -125,5 +125,11 @@ class MCPProxy:
             return self._extract_content(result.content)
 
 
-# Global proxy instance
-proxy = MCPProxy()
+# Global proxy instance - will be initialized by __main__.py with CLI args
+proxy: MCPProxy | None = None
+
+
+def init_proxy(aws_profile: str = "", aws_region: str = "us-east-1"):
+    """Initialize the global proxy with AWS credentials from CLI args."""
+    global proxy
+    proxy = MCPProxy(aws_profile=aws_profile, aws_region=aws_region)
